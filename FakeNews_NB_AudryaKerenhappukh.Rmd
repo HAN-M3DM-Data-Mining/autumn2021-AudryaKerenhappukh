@@ -1,0 +1,166 @@
+---
+title: "Naive Bayes Assignment - Fake News Classification"
+author: "Audrya Kerenhappukh"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+# Import Document and Install necessary packages 
+```{r}
+
+library(plyr)
+library(tidyverse)
+library(dplyr)
+
+trainDF <- read_csv("FakeNews-train.csv") 
+
+testDF <- read_csv("FakeNews-test.csv")
+
+```
+
+'TestDF'  still does not include label. As it is separated in other file, we will merge the testDF with submit.csv. 
+```{r}
+submitDF <- read_csv("FakeNews-submit.csv")
+
+head(submitDF)
+
+joined_df <- merge(testDF, submitDF, , by = "id",  all.x = TRUE, all.y = FALSE)
+
+testDF <- joined_df
+```
+
+The labels in both datasets are still numerical, we would want to factor them into "unreliable" and "reliable"
+
+```{r}
+
+
+trainDF$label <- factor(trainDF$label, levels = c(1,0), labels = c("unreliable", "reliable")) %>% relevel("reliable")
+
+testDF$label <- factor(testDF$label, levels = c(1,0), labels = c("unreliable", "reliable")) %>% relevel("reliable")
+
+```
+
+# Preparation 
+## Create corpus 
+
+First we need to create a corpus, which refers to a collection of text documents. In our case each  is considered a text document
+```{r}
+library(tm)
+```
+
+#### Creating corpus for Training data 
+
+```{r}
+
+trainCorpus <- Corpus(VectorSource(trainDF$text))
+
+```
+
+
+```{r}
+clean.trainCorpus <- trainCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
+```
+```{r}
+clean.trainCorpus <- clean.trainCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
+```
+
+```{r}
+clean.trainCorpus <- clean.trainCorpus %>% tm_map(stripWhitespace)
+
+```
+```{r}
+clean.trainDTM <- clean.trainCorpus %>% DocumentTermMatrix
+inspect(clean.trainDTM)
+```
+
+
+
+```{r}
+clean.trainDTM <- clean.trainCorpus %>% DocumentTermMatrix
+inspect(clean.trainDTM)
+```
+#### Create Corpus for Test Data 
+```{r}
+testCorpus <- Corpus(VectorSource(testDF$text))
+
+clean.testCorpus <- testCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
+clean.testCorpus <- clean.testCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
+clean.testCorpus <- clean.testCorpus %>% tm_map(stripWhitespace)
+
+
+```
+
+```{r}
+clean.testDTM <- clean.testCorpus %>% DocumentTermMatrix
+inspect(clean.testDTM)
+```
+### Eliminating Words with lower frequencies 
+
+```{r}
+freqwords <- clean.trainDTM %>% findFreqTerms(1000)
+trainDTM <- DocumentTermMatrix(clean.trainCorpus, list(dictionary = freqwords))
+testDTM <- DocumentTermMatrix(clean.testCorpus, list(dictionary = freqwords))
+
+inspect(trainDTM)
+inspect(testDTM)
+
+```
+
+Another issue is that the Naive Bayes classifier is typically trained on categorical features. We now have numerical matrix with word counts. We will transform the counts into a factor that simply indicates whether the word appears in the document or not. We’ll first build our own function for this and then apply it to each column in the DTM.
+```{r}
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, 1, 0) %>% 
+    factor(levels = c(0,1), labels = c("No", "Yes")) 
+}
+
+nColsDTM <- dim(trainDTM)[2]
+trainDTM <- apply(trainDTM, MARGIN = 2, convert_counts)
+testDTM <- apply(testDTM, MARGIN = 2, convert_counts)
+
+head(trainDTM[,1:10])
+```
+# Modeling and Evaluation
+
+
+We first need to install the necessary packages 
+```{r}
+library(e1071)
+library(caret)
+
+```
+
+Create the model 
+```{r}
+nbayesModel <-  naiveBayes(trainDTM, trainDF$label, laplace = 1)
+```
+
+```{r}
+predVec <- predict(nbayesModel, testDTM)
+```
+
+```{r}
+cm <- confusionMatrix(predVec, testDF$label, positive = "unreliable", dnn = c("Prediction", "True"))
+
+cm
+```
+
+## Visualization
+```{r}
+table <- as.data.frame(cm$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$True, "good", "bad")) %>%
+  group_by(True) %>%
+  mutate(prop = Freq/sum(Freq))
+
+ggplot(data = plotTable, mapping = aes(x = True, y = Prediction, fill = goodbad, alpha = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$True))) +
+  theme(axis.text.y = element_text(angle=90, hjust=0.5))
+
+
+```
+
