@@ -1,105 +1,125 @@
 ---
 title: "Naive Bayes Assignment - Fake News Classification"
-author: "Audrya Kerenhappukh"
+author: "Audrya Kerenhappukh (Author) and Ryan Kokke (Reviewer)"
+
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
-# Import Document and Install necessary packages 
-```{r}
 
-library(plyr)
+```{r message=TRUE, warning = TRUE, include = FALSE}
 library(tidyverse)
 library(dplyr)
-
-trainDF <- read_csv("FakeNews-train.csv") 
-
-testDF <- read_csv("FakeNews-test.csv")
-
+library(wordcloud)
+library(tm)
+library(caret)
+library(e1071)
+library(readr)
 ```
 
-'TestDF'  still does not include label. As it is separated in other file, we will merge the testDF with submit.csv. 
+# Business Understanding 
+Develop a machine learning program to identify when an article might be fake news
+
+# Import Document and Data Understanding 
+```{r message=TRUE, warning = TRUE, include = FALSE}
+
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/NB-fakenews.csv"
+
+rawDF <- read_csv(url) %>% na.omit # Assign to new variable and elimate NaN values
+
+
+```
+Because text could be really long we're trying to reduce the file size by making a new variable called 'author.title' 
 ```{r}
-submitDF <- read_csv("FakeNews-submit.csv")
+rawDF$author.title <- paste(rawDF$author, rawDF$title)
 
-head(submitDF)
-
-joined_df <- merge(testDF, submitDF, , by = "id",  all.x = TRUE, all.y = FALSE)
-
-testDF <- joined_df
+cbind(colnames(rawDF))
 ```
 
-The labels in both datasets are still numerical, we would want to factor them into "unreliable" and "reliable"
+```{r}
+# Create a new data set with only two variables: 'label' and 'author.title'
+cleanDF <- rawDF[c(5,6)]
+
+```
+
+
+The labels in the dataset are still numerical, we would want to factor them into "unreliable" and "reliable"
 
 ```{r}
 
-
-trainDF$label <- factor(trainDF$label, levels = c(1,0), labels = c("unreliable", "reliable")) %>% relevel("reliable")
-
-testDF$label <- factor(testDF$label, levels = c(1,0), labels = c("unreliable", "reliable")) %>% relevel("reliable")
+cleanDF$label <- factor(cleanDF$label, levels = c(1,0), labels = c("unreliable", "reliable")) %>% relevel("reliable")
 
 ```
+
+Visually inspect the data by creating worldclouds
+```{r message=TRUE, warning = FALSE, include = TRUE}
+unreliable <- cleanDF %>% 
+  filter(label == "unreliable")
+reliable <- cleanDF %>% 
+  filter(label == "reliable")
+
+wordcloud(unreliable$author.title, max.words = 30, scale = c(4, 0.8), colors= c("indianred1","indianred2","indianred3","indianred"))
+wordcloud(reliable$author.title, max.words = 30, scale = c(4, 0.8), colors= c("lightsteelblue1","lightsteelblue2","lightsteelblue3","lightsteelblue"))
+```
+
 
 # Preparation 
 ## Create corpus 
 
 First we need to create a corpus, which refers to a collection of text documents. In our case each  is considered a text document
-```{r}
-library(tm)
-```
 
 #### Creating corpus for Training data 
 
 ```{r}
 
-trainCorpus <- Corpus(VectorSource(trainDF$text))
+rawCorpus <- Corpus(VectorSource(cleanDF$author.title))
 
 ```
 
 
 ```{r}
-clean.trainCorpus <- trainCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
-```
-```{r}
-clean.trainCorpus <- clean.trainCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
+cleanCorpus <- rawCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
+cleanCorpus <- cleanCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
 ```
 
 ```{r}
-clean.trainCorpus <- clean.trainCorpus %>% tm_map(stripWhitespace)
+cleanCorpus <- cleanCorpus %>% tm_map(stripWhitespace)
 
 ```
 ```{r}
-clean.trainDTM <- clean.trainCorpus %>% DocumentTermMatrix
-inspect(clean.trainDTM)
+cleanDTM <- cleanCorpus %>% DocumentTermMatrix
+inspect(cleanDTM)
 ```
 
-
+Before we can start modelling, it is important to split the datasets into train and test sets. 
 
 ```{r}
-clean.trainDTM <- clean.trainCorpus %>% DocumentTermMatrix
-inspect(clean.trainDTM)
+set.seed(1234)
+trainIndex <- createDataPartition(cleanDF$label, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+
+# Apply split indices to DF
+trainDF <- cleanDF[trainIndex, ]
+testDF <- cleanDF[-trainIndex, ]
+
+# Apply split indices to Corpus
+trainCorpus <- cleanCorpus[trainIndex]
+testCorpus <- cleanCorpus[-trainIndex]
+
+# Apply split indices to DTM
+trainDTM <- cleanDTM[trainIndex, ]
+testDTM <- cleanDTM[-trainIndex, ]
+
 ```
-#### Create Corpus for Test Data 
-```{r}
-testCorpus <- Corpus(VectorSource(testDF$text))
 
-clean.testCorpus <- testCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
-clean.testCorpus <- clean.testCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
-clean.testCorpus <- clean.testCorpus %>% tm_map(stripWhitespace)
-
-
-```
-
-```{r}
-clean.testDTM <- clean.testCorpus %>% DocumentTermMatrix
-inspect(clean.testDTM)
-```
 ### Eliminating Words with lower frequencies 
 
 ```{r}
-freqwords <- clean.trainDTM %>% findFreqTerms(1000)
-trainDTM <- DocumentTermMatrix(clean.trainCorpus, list(dictionary = freqwords))
-testDTM <- DocumentTermMatrix(clean.testCorpus, list(dictionary = freqwords))
+freqwords <- cleanDTM %>% findFreqTerms(1000)
+trainDTM <- DocumentTermMatrix(trainCorpus, list(dictionary = freqwords))
+testDTM <- DocumentTermMatrix(testCorpus, list(dictionary = freqwords))
 
 inspect(trainDTM)
 inspect(testDTM)
@@ -117,17 +137,9 @@ nColsDTM <- dim(trainDTM)[2]
 trainDTM <- apply(trainDTM, MARGIN = 2, convert_counts)
 testDTM <- apply(testDTM, MARGIN = 2, convert_counts)
 
-head(trainDTM[,1:10])
+head(trainDTM)
 ```
 # Modeling and Evaluation
-
-
-We first need to install the necessary packages 
-```{r}
-library(e1071)
-library(caret)
-
-```
 
 Create the model 
 ```{r}
@@ -144,7 +156,7 @@ cm <- confusionMatrix(predVec, testDF$label, positive = "unreliable", dnn = c("P
 cm
 ```
 
-## Visualization
+# Visualization if Confusion Matrix 
 ```{r}
 table <- as.data.frame(cm$table)
 
