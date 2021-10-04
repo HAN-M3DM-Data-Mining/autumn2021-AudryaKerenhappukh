@@ -1,9 +1,18 @@
 ---
 title: "Naive Bayes Assignment - Fake News Classification"
-author: "Audrya Kerenhappukh (Author) and Ryan Kokke (Reviewer)"
+author: 
+- Audrya Kerenhappukh - Author 
+- Ryan Kokke - Reviewer 
 
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: html_document
+output:
+  html_document:
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+  html_notebook:
+    toc: yes
+    toc_depth: 2
 ---
 
 
@@ -17,10 +26,10 @@ library(e1071)
 library(readr)
 ```
 
-# Business Understanding 
+## Business Understanding 
 Develop a machine learning program to identify when an article might be fake news
 
-# Import Document and Data Understanding 
+## Import Document and Data Understanding 
 ```{r message=TRUE, warning = TRUE, include = FALSE}
 
 url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/NB-fakenews.csv"
@@ -63,8 +72,8 @@ wordcloud(reliable$author.title, max.words = 30, scale = c(4, 0.8), colors= c("l
 ```
 
 
-# Preparation 
-## Create corpus 
+## Preparation 
+### Create corpus 
 
 First we need to create a corpus, which refers to a collection of text documents. In our case each  is considered a text document
 
@@ -76,26 +85,33 @@ rawCorpus <- Corpus(VectorSource(cleanDF$author.title))
 
 ```
 
-
-```{r}
+```{r warning=FALSE}
 cleanCorpus <- rawCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
 cleanCorpus <- cleanCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
 ```
 
-```{r}
+```{r warning=FALSE}
 cleanCorpus <- cleanCorpus %>% tm_map(stripWhitespace)
 
 ```
+See the difference between Raw vs Clean Corpus 
+```{r}
+tibble(Raw = rawCorpus$content[1:2], Clean = cleanCorpus$content[1:2])
+```
+
 ```{r}
 cleanDTM <- cleanCorpus %>% DocumentTermMatrix
 inspect(cleanDTM)
 ```
+```{r}
 
-Before we can start modelling, it is important to split the datasets into train and test sets. 
+```
+
+Before we can start modelling, it is important to split the data sets into train and test sets. We are using 90% of datasets for training, and 10% for test.
 
 ```{r}
 set.seed(1234)
-trainIndex <- createDataPartition(cleanDF$label, p = .8, 
+trainIndex <- createDataPartition(cleanDF$label, p = .9, 
                                   list = FALSE, 
                                   times = 1)
 head(trainIndex)
@@ -139,7 +155,7 @@ testDTM <- apply(testDTM, MARGIN = 2, convert_counts)
 
 head(trainDTM)
 ```
-# Modeling and Evaluation
+## Modeling and Evaluation
 
 Create the model 
 ```{r}
@@ -156,8 +172,8 @@ cm <- confusionMatrix(predVec, testDF$label, positive = "unreliable", dnn = c("P
 cm
 ```
 
-# Visualization if Confusion Matrix 
-```{r}
+## Visualization of Confusion Matrix 
+```{r Chart Visualization }
 table <- as.data.frame(cm$table)
 
 plotTable <- table %>%
@@ -175,4 +191,3 @@ ggplot(data = plotTable, mapping = aes(x = True, y = Prediction, fill = goodbad,
 
 
 ```
-
