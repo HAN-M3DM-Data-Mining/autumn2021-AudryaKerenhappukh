@@ -1,0 +1,188 @@
+---
+title: "Assigment - kNN DIY"
+author:
+- Ryan Kokke - Author
+- Audrya Kerenhappukh - Reviewer
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: '2'
+    df_print: paged
+  html_notebook:
+    toc: yes
+    toc_depth: 2
+---
+
+```{r include = FALSE} 
+
+library(tidyverse)
+library(googlesheets4)
+library(class)
+library(caret)
+```
+
+## Business Understanding
+The data used comes from UCI Machine Learning Repository and can be found online as an open source dataset ([UCI Machine Learning Repository: HCV Data Set](https://archive.ics.uci.edu/ml/datasets/HCV+data#)). This dataset was created by R. Lichtinghagen, F. Klawonn & G. Hoffmann. The dataset contains laboratory values of blood donors and Hepatitis C patients and demographic values like age. The dataset has 14 variables (columns) and 615 observations (rows).
+
+## Data Understanding
+
+```{r}
+# The following command are missing thus I could not read the data files :
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/KNN-hcvdat0.csv"
+RawData <- read.csv(url)
+```
+
+```{r}
+str(RawData)
+```
+
+## Data Preparation
+To create a clean training set a new dataset was created.
+
+```{r}
+CleanDF<-RawData[-1]
+head(CleanDF)
+```
+
+Next, the non-relevant variables, such as the variable 'X', were deleted from the newly created dataset. 
+
+The variable named 'Category' contains the outcome to predict - '0' for 'Blood Donor', '0s' for 'Suspect Blood Donor' and '1','2' & '3' for 'Hepatitis C patients'.
+
+```{r}
+cntDiag <- table(CleanDF$Category)
+propDiag <- round(prop.table(cntDiag) * 100 , digits = 1)
+
+cntDiag
+```
+As can be seen, there are five categories while we only want to predict if someone is a blood donor or a Hepatitis C patient. To clean this column or attribute in the training set we can transform the data in this column:
+
+```{r}
+CleanDF$Category <- factor(CleanDF$Category, levels = c("0=Blood Donor","0s=suspect Blood Donor", "1=Hepatitis", "2=Fibrosis", "3=Cirrhosis"), labels = c("Blood Donor", "Blood Donor", "Hepatitis C", "Hepatitis C", "Hepatitis C"))
+
+head(CleanDF, 10)
+
+table(CleanDF$Category) # Check whether labels are assigned correctly 
+```
+Now lets also look at the missing values, to check if any column has missing values we can use the following command:
+
+```{r}
+CleanDF %>% map(~sum(is.na(.)))
+```
+After running this command it shows that the columns ALB, ALP, ALT, CHOL and PROT have missing values or na (not avalaible) as a value. Lets delete the rows with the missing values to create a clean dataset. 
+
+```{r}
+CleanDF_omit <- drop_na(CleanDF)
+CleanDF_omit
+```
+Next up the values in the columns have to be normalized
+
+```{r}
+
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x))) 
+}
+
+CleanDF_norm<-as.data.frame(lapply(CleanDF_omit[c(4:13)], normalize)) 
+
+CleanDF_3<-subset(CleanDF_omit,select=c(1)) 
+
+CleanDF_n <- cbind(CleanDF_3, CleanDF_norm)
+
+```
+
+
+We split the data into training and test sets. We partition 80 % of the data into the training set and the remaining 20% into the test set. 
+
+```{r}
+
+# Randomly choose for sample rows 
+
+samplesize <- floor(nrow(CleanDF_n) * .8) 
+
+# Set the seed to make partition reproducible 
+
+set.seed(1234)
+
+rows<-sample(seq_len(nrow(CleanDF_n)), size = samplesize)
+
+
+```
+
+
+```{r}
+
+# As the number of rows already defined by 'rows' variable, thee is no need of selecting specific number anymore 
+
+trainDF_feat <- CleanDF_n[rows,-1] 
+testDF_feat <- CleanDF_n[-rows,-1] 
+
+trainDF_labels <- as.data.frame(CleanDF_n[rows, 1])
+testDF_labels <- as.data.frame(CleanDF_n[-rows, 1])
+```
+
+We have to decide on the number of neighbors (k). There are several rules of thumb, one being the square root of the number of observations in the training set. In this case, the reviewer assumed that author use the square root of the sample size N as the number of neighbors(k)
+
+```{r}
+k.neighbors <- sqrt(samplesize)
+
+cleanDF_test_pred <- knn(train = as.matrix(trainDF_feat), test = as.matrix(testDF_feat), cl = as.matrix(trainDF_labels), k = k.neighbors)
+
+confusionMatrix(cleanDF_test_pred, testDF_labels[[1]], positive = "Hepatitis C", dnn = c("Prediction", "True"))
+```
+### Using optimal number of neighbors (k) to improve accuracy
+
+Another option is to use Caret package to pick the optimal number of neighbors (k) for you: 
+```{r}
+
+category_pred_caret <- train(trainDF_feat, trainDF_labels[[1]], method = "knn", preProcess = c("center","scale"))
+
+plot(category_pred_caret)
+
+```
+ 
+ The graph above shows accuracy peaking at k = 5, so I am going to use this number for the following model.
+
+```{r}
+cleanDF_test_pred2 <- knn(train = as.matrix(trainDF_feat), test = as.matrix(testDF_feat), cl = as.matrix(trainDF_labels), k = 5)
+
+head(cleanDF_test_pred)
+
+```
+
+Next, we compare our predicted values of category to our actual values. The confusion matrix gives an indication of how well our model predicted the actual values.
+
+The confusion matrix output also shows overall model statistics and statistics by class.
+```{r}
+cm <- confusionMatrix(cleanDF_test_pred2, testDF_labels[[1]], positive = "Hepatitis C", dnn = c("Prediction", "True"))
+
+cm
+```
+From the results above, the result shows 97% accuracy of this model, 5% increase compared to the previous attempt. 
+
+## Visualization 
+
+Adding a visualization would also make the confusion matrix more readable, you can add the following adds to plot visualization:
+
+```{r include = FALSE}
+library(ggplot2)
+library(dplyr)
+```
+
+```{r}
+table <- as.data.frame(cm$table)
+
+plotTable <- table %>%
+  mutate(goodbad = ifelse(table$Prediction == table$True, "good", "bad")) %>%
+  group_by(True) %>%
+  mutate(prop = Freq/sum(Freq))
+
+ggplot(data = plotTable, mapping = aes(x = True, y = Prediction, fill = goodbad, alpha = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", alpha = 1) +
+  scale_fill_manual(values = c(good = "green", bad = "red")) +
+  theme_bw() +
+  xlim(rev(levels(table$True))) +
+  theme(axis.text.y = element_text(angle=90, hjust=0.5))
+```
+
